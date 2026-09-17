@@ -5,7 +5,20 @@ DESTDIR =
 
 CXX ?= g++
 STRIP ?= strip
+PICOLV2 ?= 0
 
+ifeq ($(PICOLV2),1)
+MCPU = -mcpu=cortex-m33 -mthumb -mfloat-abi=hard -mfpu=fpv5-sp-d16
+CXX = arm-none-eabi-g++
+OPTS = -O2 $(MCPU) -ffast-math -funroll-loops -Wall -fPIC -DPIC -DPICOLV2 \
+	-fdata-sections -ffunction-sections -fno-exceptions -fno-rtti \
+	-fno-use-cxa-atexit -idirafter /usr/include
+CXXFLAGS = $(OPTS) -I../.. -fvisibility=hidden -fvisibility-inlines-hidden
+LDFLAGS = $(MCPU) -shared -nostdlib -Wl,-Bsymbolic -Wl,-z,undefs \
+	-Wl,-z,max-page-size=0x1000 -Wl,--no-warnings -Wl,-s \
+	-Wl,--gc-sections -Wl,--start-group -lgcc -lc -lm -lnosys -Wl,--end-group
+PICOLV2_RUNTIME_OBJ = ../../picolv2-runtime.o
+else
 ifdef DEBUG
 OPTS = -fPIC -DPIC -g -DDEBUG
 else
@@ -23,9 +36,10 @@ LDFLAGS += -dynamiclib -Wl,-dead_strip -Wl,-dead_strip_dylibs
 else
 LDFLAGS += -shared -Wl,--gc-sections -Wl,--no-undefined
 endif
+endif
 
 SOURCES = ../../Eq.cc ../../dsp/polynomials.cc interface.cc
-OBJECTS = $(SOURCES:.cc=.o)
+OBJECTS = $(SOURCES:.cc=.o) $(PICOLV2_RUNTIME_OBJ)
 
 PLUG   = Eq4p
 BUNDLE = mod-caps-$(PLUG).lv2
@@ -47,6 +61,9 @@ $(PLUG).so: $(OBJECTS)
 
 .cc.o: .depend
 	$(CXX) $< $(CXXFLAGS) -o $@ -c
+
+../../picolv2-runtime.o: ../../picolv2-runtime.cpp
+	$(CXX) $(CXXFLAGS) -std=gnu++11 -c $< -o $@
 
 install: all
 	install -d $(DESTDIR)$(LV2DEST)
