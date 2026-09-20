@@ -54,12 +54,62 @@
 #include "dsp/Sine.h"
 #include "dsp/util.h"
 
+#ifdef PICOLV2
+typedef sample_t reverb_real_t;
+
+/* The Cortex-M33 has a single-precision FPU, but no double-precision FPU.
+ * Keep the Plate modulation oscillator in hardware float on PicoLV2; the
+ * desktop build retains DSP::Sine's original double-precision recurrence. */
+class ReverbSine
+{
+	public:
+		sample_t sine, cosine;
+		sample_t sine_step, cosine_step;
+		uint normalize_counter;
+
+		ReverbSine()
+		: sine(0), cosine(1), sine_step(0), cosine_step(1),
+		  normalize_counter(0)
+			{}
+
+		void set_f (double f, double fs, double phase)
+		{
+			double w = f*2*M_PI/fs;
+			sine_step = (sample_t) sin(w);
+			cosine_step = (sample_t) cos(w);
+			sine = (sample_t) sin(phase - w);
+			cosine = (sample_t) cos(phase - w);
+			normalize_counter = 0;
+		}
+
+		inline sample_t get()
+		{
+			const sample_t old_sine = sine;
+			sine = old_sine*cosine_step + cosine*sine_step;
+			cosine = cosine*cosine_step - old_sine*sine_step;
+
+			/* cosine_step rounds to one at very low frequencies.  Correct the
+			 * resulting slow amplitude drift outside the usual audio block. */
+			if ((++normalize_counter & 4095) == 0)
+			{
+				const sample_t scale = 1/sqrtf(sine*sine + cosine*cosine);
+				sine *= scale;
+				cosine *= scale;
+			}
+			return sine;
+		}
+};
+#else
+typedef double reverb_real_t;
+typedef DSP::Sine ReverbSine;
+#endif
+
 /* both reverbs use this */
 class Lattice
 : public DSP::Delay
 {
 	public:
-		sample_t process (sample_t x, double d)
+		sample_t process (sample_t x, reverb_real_t d)
 			{
 				sample_t y = get();
 				x -= d*y;
@@ -98,7 +148,7 @@ class JVRev
 
 		DSP::Delay left, right;
 		
-		double apc;
+		reverb_real_t apc;
 		
 		void cycle (uint frames);
 
@@ -119,7 +169,7 @@ class ModLattice
 		float n0, width;
 
 		DSP::Delay delay;
-		DSP::Sine lfo;
+		ReverbSine lfo;
 		
 		void init (int n, int w)
 			{
@@ -134,7 +184,7 @@ class ModLattice
 			}
 
 		inline sample_t
-		process (sample_t x, double d)
+		process (sample_t x, reverb_real_t d)
 			{
 				sample_t y = delay.get_linear (n0 + width * lfo.get());
 				x += d * y;

@@ -247,8 +247,8 @@ PlateStub::process(sample_t x, sample_t decay, sample_t * _xl, sample_t * _xr)
 	x = input.lattice[3].process(x, indiff2);
 
 	/* summation point */
-	register double xl = x + decay*tank.delay[3].get();
-	register double xr = x + decay*tank.delay[1].get();
+	reverb_real_t xl = x + decay*tank.delay[3].get();
+	reverb_real_t xr = x + decay*tank.delay[1].get();
 
 	/* lh */
 	xl = tank.mlattice[0].process(xl, dediff1);
@@ -267,19 +267,20 @@ PlateStub::process(sample_t x, sample_t decay, sample_t * _xl, sample_t * _xr)
 	tank.delay[3].put(xr);
 
 	/* gather output */
-	xl  = .6 * tank.delay[2] [tank.taps[0]];
-	xl += .6 * tank.delay[2] [tank.taps[1]];
-	xl -= .6 * tank.lattice[1] [tank.taps[2]];
-	xl += .6 * tank.delay[3] [tank.taps[3]];
-	xl -= .6 * tank.delay[0] [tank.taps[4]];
-	xl += .6 * tank.lattice[0] [tank.taps[5]];
+	const reverb_real_t output_gain = .6;
+	xl  = output_gain * tank.delay[2] [tank.taps[0]];
+	xl += output_gain * tank.delay[2] [tank.taps[1]];
+	xl -= output_gain * tank.lattice[1] [tank.taps[2]];
+	xl += output_gain * tank.delay[3] [tank.taps[3]];
+	xl -= output_gain * tank.delay[0] [tank.taps[4]];
+	xl += output_gain * tank.lattice[0] [tank.taps[5]];
 
-	xr  = .6 * tank.delay[0] [tank.taps[6]];
-	xr += .6 * tank.delay[0] [tank.taps[7]];
-	xr -= .6 * tank.lattice[0] [tank.taps[8]];
-	xr += .6 * tank.delay[1] [tank.taps[9]];
-	xr -= .6 * tank.delay[2] [tank.taps[10]];
-	xr += .6 * tank.lattice[1] [tank.taps[11]];
+	xr  = output_gain * tank.delay[0] [tank.taps[6]];
+	xr += output_gain * tank.delay[0] [tank.taps[7]];
+	xr -= output_gain * tank.lattice[0] [tank.taps[8]];
+	xr += output_gain * tank.delay[1] [tank.taps[9]];
+	xr -= output_gain * tank.delay[2] [tank.taps[10]];
+	xr += output_gain * tank.lattice[1] [tank.taps[11]];
 
 	*_xl = xl;
 	*_xr = xr;
@@ -290,17 +291,31 @@ PlateStub::process(sample_t x, sample_t decay, sample_t * _xl, sample_t * _xr)
 void
 Plate::cycle(uint frames)
 {
-	sample_t bw = .005 + .994*getport(0);
+	sample_t bw = (reverb_real_t) .005 +
+			(reverb_real_t) .994*getport(0);
+#ifdef PICOLV2
+	input.bandwidth.set(expf (-3.14159265358979323846f * (1.f - bw)));
+#else
 	input.bandwidth.set(exp (-M_PI * (1. - bw)));
+#endif
 
-	sample_t decay = .749*getport(1);
+	sample_t decay = (reverb_real_t) .749*getport(1);
 
+#ifdef PICOLV2
+	sample_t damp = expf(-3.14159265358979323846f *
+			(.0005f+.9995f*getport(2)));
+#else
 	double damp = exp(-M_PI * (.0005+.9995*getport(2)));
+#endif
 	tank.damping[0].set(damp);
 	tank.damping[1].set(damp);
 
 	sample_t blend = getport(3);
+#ifdef PICOLV2
+	blend = powf(blend, 1.6f); /* linear is not a good choice for this pot */
+#else
 	blend = pow(blend, 1.6); /* linear is not a good choice for this pot */
+#endif
 	sample_t dry = 1 - blend;
 
 	sample_t * s = ports[4];
@@ -309,7 +324,9 @@ Plate::cycle(uint frames)
 	sample_t * dr = ports[6];
 
 	/* modulated lattice interpolation needs float truncation */
+#if defined(__i386__) && !defined(__SSE2__)
 	DSP::FPTruncateMode _truncate;
+#endif
 
 	for(uint i = 0; i < frames; ++i)
 	{
@@ -355,17 +372,31 @@ Descriptor<Plate>::setup()
 void
 PlateX2::cycle(uint frames)
 {
-	sample_t bw = .005 + .994*getport(0);
+	sample_t bw = (reverb_real_t) .005 +
+			(reverb_real_t) .994*getport(0);
+#ifdef PICOLV2
+	input.bandwidth.set(expf (-3.14159265358979323846f * (1.f - bw)));
+#else
 	input.bandwidth.set(exp (-M_PI * (1. - bw)));
+#endif
 
-	sample_t decay = .749*getport(1);
+	sample_t decay = (reverb_real_t) .749*getport(1);
 
+#ifdef PICOLV2
+	sample_t damp = expf(-3.14159265358979323846f *
+			(.0005f+.9995f*getport(2)));
+#else
 	double damp = exp(-M_PI * (.0005+.9995*getport(2)));
+#endif
 	tank.damping[0].set(damp);
 	tank.damping[1].set(damp);
 
 	sample_t blend = getport(3);
+#ifdef PICOLV2
+	blend = powf(blend, 1.53f);
+#else
 	blend = pow(blend, 1.53); 
+#endif
 	sample_t dry = 1 - blend;
 
 	sample_t * sl = ports[4];
@@ -374,7 +405,9 @@ PlateX2::cycle(uint frames)
 	sample_t * dr = ports[7];
 
 	/* the modulated lattices interpolate, which needs truncated float */
+#if defined(__i386__) && !defined(__SSE2__)
 	DSP::FPTruncateMode _truncate;
+#endif
 
 	for(uint i = 0; i < frames; ++i)
 	{
@@ -412,5 +445,4 @@ Descriptor<PlateX2>::setup()
 	Name = CAPS "PlateX2 - Versatile plate reverb, stereo inputs";
 	autogen();
 }
-
 
