@@ -49,34 +49,74 @@ class Delay
 
 		void init(uint n)
 			{
+			#ifdef PICOLV2
+				/* Exact-sized circular storage saves about 60 KiB in Plate at
+				 * 48 kHz.  The desktop implementation retains mask-based power-
+				 * of-two wrapping. */
+				size = n;
+				assert(size > 0 && size <= (1 << 20));
+				data = (sample_t *) calloc(sizeof (sample_t), size);
+				read = write = 0;
+			#else
 				size = next_power_of_2(n);
 				assert(size <= (1 << 20));
 				data = (sample_t *) calloc(sizeof (sample_t), size);
 				--size; /* used as mask for confining access */
 				write = n;
+			#endif
 			}
 
 		void reset()
 			{
+			#ifdef PICOLV2
+				memset(data, 0, size * sizeof (sample_t));
+			#else
 				memset(data, 0, (size + 1) * sizeof (sample_t));
+			#endif
 			}
 
+	#ifdef PICOLV2
+		sample_t & operator [] (int i)
+			{
+				int index = (int) write - i;
+				while (index < 0) index += size;
+				return data[index];
+			}
+	#else
 		sample_t & operator [] (int i) { return data [(write - i) & size]; }
+	#endif
 
 		inline void put(sample_t x)
 			{
 				data [write] = x;
+			#ifdef PICOLV2
+				if (++write == size) write = 0;
+			#else
 				write = (write + 1) & size;
+			#endif
 			}
 
 		inline sample_t get()
 			{
 				sample_t x = data [read];
+			#ifdef PICOLV2
+				if (++read == size) read = 0;
+			#else
 				read = (read + 1) & size;
+			#endif
 				return x;
 			}
 		inline sample_t peek() { return data [read]; }
+	#ifdef PICOLV2
+		inline sample_t putget (sample_t x)
+			{
+				sample_t y = get();
+				put(x);
+				return y;
+			}
+	#else
 		inline sample_t putget (sample_t x) {put(x); return get();}
+	#endif
 
 		/* fractional lookup, linear interpolation */
 		inline sample_t get_linear (float f)
@@ -123,7 +163,9 @@ class MovingAverage
 				this->Delay::init (n);
 				over_n = 1. / n;
 				/* adjust write pointer so we have a full history of zeros */
+			#ifndef PICOLV2
 				write = (write + size + 1) & size;
+			#endif
 				state = 0;
 			}
 
